@@ -9,7 +9,7 @@ const { WebSocketServer, WebSocket } = require("ws");
 
 const PORT = Number(process.env.PORT || 10000);
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS || 100);
-const WEB_DIR = path.join(__dirname, "web");
+const WEB_DIR = __dirname;
 // Se shell_login.data for só um ponteiro do Git LFS (arquivo de ~130 bytes),
 // o servidor redireciona para uma cópia real hospedada. Troque via variável de ambiente.
 const SHELL_DATA_URL = process.env.SHELL_DATA_URL || "https://andvolodko.github.io/mu-online-solo-classic/shell_login.data";
