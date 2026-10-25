@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: mu-online
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      # Opcional: banco PostgreSQL para as estatísticas do portal
+      - key: DATABASE_URL
+        sync: false
+      # Opcional: onde buscar o shell_login.data se ele chegar como ponteiro Git LFS
+      - key: SHELL_DATA_URL
+        sync: false
