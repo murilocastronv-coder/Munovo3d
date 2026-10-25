@@ -44,6 +44,7 @@
     <button id="muMpPill" type="button" aria-label="Multiplayer"><span id="muMpDot"></span><span id="muMpCount">…</span></button>
     <div id="muMpPanel">
       <div id="muMpWho">Conectando…</div>
+      <div id="muMpDbg" style="padding:5px 9px;font:10px monospace;color:#8fa1ba;white-space:pre-wrap;overflow-wrap:anywhere;border-bottom:1px solid rgba(255,255,255,.1)"></div>
       <div id="muMpLog" aria-live="polite"></div>
       <form id="muMpForm"><input id="muMpText" maxlength="240" autocomplete="off" placeholder="Mensagem…"><button type="submit">Enviar</button></form>
       <form id="muMpName"><input id="muMpNick" maxlength="18" autocomplete="off" aria-label="Seu nome" style="min-width:0;flex:1;background:#0b111b;color:#fff;border:1px solid #48556a;border-radius:6px;padding:6px"><button type="submit" style="background:#2a2d37;color:#eee;border:0;border-radius:6px;padding:0 10px">Nome</button></form>
@@ -52,6 +53,13 @@
   document.body.appendChild(root);
   const $ = id => document.getElementById(id);
   const count = $("muMpCount"), who = $("muMpWho"), log = $("muMpLog"), toast = $("muMpToast"), nick = $("muMpNick");
+
+  const dbg = () => document.getElementById("muMpDbg");
+  setInterval(() => {
+    const d = dbg(); if (!d || !root.classList.contains("open")) return;
+    d.textContent = "ws:" + (socket && socket.readyState === 1 ? "ok" : "off") + " " + WS_URL.replace(/^wss?:\/\//, "") + (rtt ? " " + rtt + "ms" : "") +
+      "\n" + (world ? world.status() : "mundo desligado");
+  }, 700);
 
   let name = "";
   try { name = localStorage.getItem("muMpName") || ""; } catch (_) {}
@@ -69,6 +77,7 @@
     debug: qs.get("mpdebug") === "1",
     csLen: Number(qs.get("mpcs")) || window.MU_MP_CHARSET_LEN || 18,
     charset: window.MU_MP_CHARSET,
+    moveCode: qs.get("mpmove") ? parseInt(qs.get("mpmove"), 16) : 0,
     deliver: bytes => { if (window.soloBridge && window.soloBridge.deliver) window.soloBridge.deliver(bytes); },
     sendMove: (x, y) => queueMove(x, y)
   }) : null;

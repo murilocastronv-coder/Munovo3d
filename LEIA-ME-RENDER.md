@@ -21,6 +21,9 @@ Todos entram na mesma sala "Lorencia". Seu cliente lê seus movimentos, manda pa
 jogadores aparecem dentro do jogo (até 16 casas de distância) e andam em tempo real.
 - Um jogador só aparece para os outros depois de dar o **primeiro movimento** (clicar para andar).
 - Funciona enquanto todos estão no mesmo mapa (Lorencia). Ao trocar de mapa, a sincronização pausa 2 s.
+- **Diagnóstico no celular:** toque na pílula "● N online"; no topo do painel aparece uma caixinha com o estado
+  (ws ok/off, mundo sim/não, posição, remotos, visíveis, injetados e os códigos de pacote mais frequentes).
+  O módulo aprende sozinho o formato do pacote do seu herói e copia a sua aparência para os outros jogadores.
 - Console do navegador (F12) com `?mpdebug=1` na URL mostra o que está sendo enviado/injetado.
 - Se os jogadores não aparecerem ou o jogo reclamar: tente `?mpcs=13` (outro tamanho de CharSet) ou
   `?mpworld=0` (desliga só a parte visual; chat e lista continuam).
