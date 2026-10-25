@@ -338,6 +338,11 @@ window.muInstallAudio = function () {
   }
 
   function deliverPacketToClient(bytes) {
+    try { if (window.muMpOnServerPacket) window.muMpOnServerPacket(bytes); } catch (e) { }
+    deliverRaw(bytes);
+  }
+
+  function deliverRaw(bytes) {
     var heap = null;
     try {
       heap = (typeof window !== 'undefined' && window.HEAPU8) || (typeof Module !== 'undefined' && Module.HEAPU8);
@@ -454,6 +459,8 @@ window.muInstallAudio = function () {
   }
 
   window.soloBridge = {
+    // usado pelo multiplayer para injetar pacotes (jogadores remotos) direto no cliente
+    deliver: function (bytes) { deliverRaw(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)); },
     flushQueue: function () {
       while (incomingQueue.length > 0) {
         const pkt = incomingQueue.shift();
@@ -492,6 +499,7 @@ window.muInstallAudio = function () {
       });
     },
     send: function (uint8Data) {
+      try { if (window.muMpOnClientPacket) window.muMpOnClientPacket(uint8Data); } catch (e) { }
       if (!worker || !workerReady) {
         console.warn('[SoloBridge] Worker not ready to send packet');
         return;

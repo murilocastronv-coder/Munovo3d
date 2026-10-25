@@ -59,7 +59,36 @@
   nick.value = name;
 
   const roster = new Map();
-  let socket = null, retry = null, toastTimer = null, retryMs = 2000;
+  let socket = null, retry = null, toastTimer = null, retryMs = 1000;
+  let rtt = 0, pingTimer = null, lastPong = 0, lastSent = 0, sendTimer = null, pendingPos = null, myId = null;
+
+  // ---- mundo: mostra os outros jogadores dentro do jogo ----
+  const qs = new URLSearchParams(location.search);
+  const WORLD_ON = qs.get("mpworld") !== "0" && window.MuMpWorld;
+  const world = WORLD_ON ? window.MuMpWorld.create({
+    debug: qs.get("mpdebug") === "1",
+    csLen: Number(qs.get("mpcs")) || window.MU_MP_CHARSET_LEN || 18,
+    charset: window.MU_MP_CHARSET,
+    deliver: bytes => { if (window.soloBridge && window.soloBridge.deliver) window.soloBridge.deliver(bytes); },
+    sendMove: (x, y) => queueMove(x, y)
+  }) : null;
+  if (world) {
+    window.muMpOnClientPacket = b => world.onClientPacket(b);
+    window.muMpOnServerPacket = b => world.onServerPacket(b);
+    setInterval(() => world.tick(), 200);
+  }
+  // Envia a posição no máximo ~12x/s, mas SEMPRE o último destino (sem perder o final do movimento).
+  function queueMove(x, y) {
+    pendingPos = { x, y };
+    const wait = 80 - (Date.now() - lastSent);
+    if (wait <= 0) flushMove(); else if (!sendTimer) sendTimer = setTimeout(flushMove, wait);
+  }
+  function flushMove() {
+    sendTimer = null;
+    if (!pendingPos) return;
+    lastSent = Date.now();
+    send({ type: "move", x: pendingPos.x, y: pendingPos.y, map: ROOM });
+  }
 
   function line(text, who2, sys) {
     const p = document.createElement("p"); if (sys) p.className = "s";
@@ -76,35 +105,60 @@
     toastTimer = setTimeout(() => toast.classList.remove("show"), 6000);
   }
   function renderRoster() {
-    count.textContent = roster.size + " online";
+    count.textContent = roster.size + " online" + (rtt ? " · " + rtt + "ms" : "");
     who.textContent = roster.size ? "Na sala " + ROOM + ": " + [...roster.values()].map(p => p.name).join(", ") : "Sala vazia";
   }
   function send(o) { if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(o)); }
 
+  function startPing() {
+    clearInterval(pingTimer); lastPong = Date.now();
+    // Ping a cada 15 s: mantém a conexão viva (proxies derrubam sockets ociosos) e mede o atraso.
+    pingTimer = setInterval(() => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - lastPong > 45000) { try { socket.close(); } catch (_) {} return; } // conexão morta: reconecta
+      send({ type: "ping", at: Date.now() });
+    }, 15000);
+  }
+
   function connect() {
     if (socket && socket.readyState <= 1) return;
     try { socket = new WebSocket(WS_URL); } catch (_) { return; }
-    socket.addEventListener("open", () => {
-      retryMs = 2000; root.classList.add("on");
+    const mine = socket;
+    mine.addEventListener("open", () => {
+      retryMs = 1000; root.classList.add("on");
       send({ type: "join", name, room: ROOM });
+      startPing();
     });
-    socket.addEventListener("message", ev => {
+    mine.addEventListener("message", ev => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === "welcome") {
-        roster.clear(); (m.players || []).forEach(p => roster.set(p.id, p));
+        myId = m.id; lastPong = Date.now();
+        roster.clear(); if (world) world.reset();
+        (m.players || []).forEach(p => { roster.set(p.id, p); if (world && p.id !== myId) world.upsert(p); });
         renderRoster(); line("Você entrou na sala " + m.room + ".", "", true);
-      } else if (m.type === "join") { roster.set(m.player.id, m.player); renderRoster(); }
-      else if (m.type === "leave") { roster.delete(m.id); renderRoster(); }
+        if (world && world.me.inWorld) queueMove(world.me.x, world.me.y); // reenvia onde você está
+      } else if (m.type === "join") { roster.set(m.player.id, m.player); if (world) world.upsert(m.player); renderRoster(); }
+      else if (m.type === "leave") { roster.delete(m.id); if (world) world.remove(m.id); renderRoster(); }
+      else if (m.type === "move") { if (world) world.upsert({ id: m.id, x: m.x, y: m.y }); }
+      else if (m.type === "rename") { const p = roster.get(m.id); if (p) p.name = m.name; if (world) world.upsert({ id: m.id, name: m.name }); renderRoster(); }
+      else if (m.type === "pong") { lastPong = Date.now(); rtt = Math.max(1, Date.now() - (m.at || Date.now())); renderRoster(); }
       else if (m.type === "system") line(m.text, "", true);
       else if (m.type === "chat") { line(m.text, m.name, false); if (!root.classList.contains("open")) flash(m.text, m.name); }
       else if (m.type === "error") line(m.message, "", true);
     });
-    socket.addEventListener("close", () => {
-      root.classList.remove("on"); roster.clear(); count.textContent = "offline"; who.textContent = "Reconectando…";
-      clearTimeout(retry); retry = setTimeout(connect, retryMs); retryMs = Math.min(retryMs * 1.7, 20000);
+    mine.addEventListener("close", () => {
+      if (socket !== mine) return;
+      clearInterval(pingTimer);
+      root.classList.remove("on"); roster.clear(); rtt = 0; count.textContent = "offline"; who.textContent = "Reconectando…";
+      if (world) world.reset(); // some com os jogadores remotos enquanto está offline (sem "fantasmas")
+      clearTimeout(retry); retry = setTimeout(connect, retryMs); retryMs = Math.min(retryMs * 1.6, 10000);
     });
-    socket.addEventListener("error", () => { try { socket.close(); } catch (_) {} });
+    mine.addEventListener("error", () => { try { mine.close(); } catch (_) {} });
   }
+  // Voltou pra aba / a internet voltou: reconecta na hora em vez de esperar o próximo retry.
+  const wake = () => { if (!socket || socket.readyState > 1) { clearTimeout(retry); retryMs = 1000; connect(); } };
+  window.addEventListener("online", wake);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) wake(); });
 
   $("muMpPill").addEventListener("click", () => { root.classList.toggle("open"); toast.classList.remove("show"); });
   // toque fora fecha o painel

@@ -16,6 +16,21 @@
 Fica no Git LFS. Se chegar à Render como ponteiro (~130 bytes), o servidor redireciona para
 `SHELL_DATA_URL` (padrão: cópia do autor original no GitHub Pages). Defina a variável para usar a sua.
 
+## Multiplayer no mundo (novo)
+Todos entram na mesma sala "Lorencia". Seu cliente lê seus movimentos, manda para o servidor, e os outros
+jogadores aparecem dentro do jogo (até 16 casas de distância) e andam em tempo real.
+- Um jogador só aparece para os outros depois de dar o **primeiro movimento** (clicar para andar).
+- Funciona enquanto todos estão no mesmo mapa (Lorencia). Ao trocar de mapa, a sincronização pausa 2 s.
+- Console do navegador (F12) com `?mpdebug=1` na URL mostra o que está sendo enviado/injetado.
+- Se os jogadores não aparecerem ou o jogo reclamar: tente `?mpcs=13` (outro tamanho de CharSet) ou
+  `?mpworld=0` (desliga só a parte visual; chat e lista continuam).
+
+## Anti-lag
+Ping a cada 15 s (mantém o socket vivo e mostra ms na pílula), reconexão em 1 s (e na hora ao voltar pra aba
+ou quando a internet volta), Nagle desligado no servidor e o último destino de movimento nunca é descartado.
+No plano gratuito da Render o serviço dorme após ~15 min: use um monitor (ex.: UptimeRobot) em `/health`
+a cada 5 min para manter acordado.
+
 ## Limites
-O multiplayer é chat + jogadores online; monstros e combate rodam no navegador de cada um.
-No plano gratuito a Render dorme após ~15 min sem acesso (primeiro acesso: 30–60 s).
+Monstros e combate rodam no navegador de cada um (não são sincronizados). Os outros jogadores aparecem com
+a aparência padrão e o nome escolhido.

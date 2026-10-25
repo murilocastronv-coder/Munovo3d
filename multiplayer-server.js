@@ -28,7 +28,7 @@ function roomName(value) {
   return String(value || "Lorencia").replace(/[^\w -]/g, "").trim().slice(0, 24) || "Lorencia";
 }
 function snapshot(room) {
-  return [...room.values()].map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, map: p.map, joinedAt: p.joinedAt }));
+  return [...room.values()].map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, hasPos: p.hasPos, map: p.map, joinedAt: p.joinedAt }));
 }
 function onlineCount() {
   return [...rooms.values()].reduce((n, room) => n + room.size, 0);
@@ -138,13 +138,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 // ---------- multiplayer (WebSocket) ----------
-const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 4096 });
-wss.on("connection", (ws) => {
+const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 4096, perMessageDeflate: false });
+wss.on("connection", (ws, req) => {
+  // Desliga o algoritmo de Nagle: pacotes pequenos de movimento saem na hora (menos lag).
+  try { ws._socket.setNoDelay(true); } catch (_) {}
   if (onlineCount() >= MAX_PLAYERS) {
     ws.send(JSON.stringify({ type: "error", message: "Servidor cheio. Tente novamente mais tarde." }));
     return ws.close(1013, "Server full");
   }
-  const player = { id: Math.random().toString(36).slice(2, 10), name: "Player", map: "Lorencia", x: 0, y: 0, joinedAt: Date.now(), ws, roomName: null, lastMove: 0, chatTimes: [] };
+  const player = { id: Math.random().toString(36).slice(2, 10), name: "Player", map: "Lorencia", x: 0, y: 0, joinedAt: Date.now(), ws, roomName: null, lastMove: 0, chatTimes: [], hasPos: false, moveTimer: null, pendingMove: null };
   ws.isAlive = true;
   ws.on("pong", () => { ws.isAlive = true; });
   ws.on("message", raw => {
@@ -154,6 +156,10 @@ wss.on("connection", (ws) => {
     if (msg.type === "join") {
       const nextRoomName = roomName(msg.room);
       const nextName = safeName(msg.name);
+      if (player.roomName === nextRoomName && rooms.get(nextRoomName) && rooms.get(nextRoomName).has(player.id)) {
+        if (nextName !== player.name) { player.name = nextName; broadcast(rooms.get(nextRoomName), { type: "rename", id: player.id, name: player.name }); }
+        return;
+      }
       if (player.roomName) {
         const oldRoom = rooms.get(player.roomName);
         if (oldRoom) { oldRoom.delete(player.id); broadcast(oldRoom, { type: "leave", id: player.id }); if (!oldRoom.size) rooms.delete(player.roomName); }
@@ -162,7 +168,7 @@ wss.on("connection", (ws) => {
       const room = getRoom(nextRoomName);
       room.set(player.id, player);
       ws.send(JSON.stringify({ type: "welcome", id: player.id, room: nextRoomName, players: snapshot(room) }));
-      broadcast(room, { type: "join", player: { id: player.id, name: player.name, x: player.x, y: player.y, map: player.map } }, ws);
+      broadcast(room, { type: "join", player: { id: player.id, name: player.name, x: player.x, y: player.y, hasPos: player.hasPos, map: player.map } }, ws);
       broadcast(room, { type: "system", text: player.name + " entrou na sala." });
       return;
     }
@@ -178,19 +184,24 @@ wss.on("connection", (ws) => {
       const text = String(msg.text || "").trim().slice(0, 240);
       if (text) broadcast(room, { type: "chat", id: player.id, name: player.name, text, at: now });
     } else if (msg.type === "move") {
-      const now = Date.now();
-      if (now - player.lastMove < 40) return; // no máximo ~25 movimentos/s por jogador
       const x = Number(msg.x), y = Number(msg.y);
-      if (Number.isFinite(x) && Number.isFinite(y)) {
-        player.lastMove = now;
-        player.x = Math.max(0, Math.min(1000, x));
-        player.y = Math.max(0, Math.min(1000, y));
-        player.map = roomName(msg.map || player.map);
-        broadcast(room, { type: "move", id: player.id, x: player.x, y: player.y, map: player.map }, ws);
-      }
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      player.x = Math.max(0, Math.min(255, Math.round(x)));
+      player.y = Math.max(0, Math.min(255, Math.round(y)));
+      player.hasPos = true;
+      const flush = () => {
+        player.moveTimer = null; player.lastMove = Date.now();
+        const r = player.roomName && rooms.get(player.roomName);
+        if (r) broadcast(r, { type: "move", id: player.id, x: player.x, y: player.y }, ws);
+      };
+      const wait = 50 - (Date.now() - player.lastMove);
+      // Nunca descarta o último destino: se veio rápido demais, agenda para depois (antes era perdido).
+      if (wait <= 0) { if (player.moveTimer) { clearTimeout(player.moveTimer); } flush(); }
+      else if (!player.moveTimer) player.moveTimer = setTimeout(flush, wait);
     }
   });
   ws.on("close", () => {
+    if (player.moveTimer) clearTimeout(player.moveTimer);
     if (!player.roomName) return;
     const room = rooms.get(player.roomName);
     if (room) { room.delete(player.id); broadcast(room, { type: "leave", id: player.id }); broadcast(room, { type: "system", text: player.name + " saiu da sala." }); if (!room.size) rooms.delete(player.roomName); }
